@@ -23,6 +23,7 @@ The EC2 console can be used to launch the instance.
 * As _Name_ select _OpenVPN_ and click _Configure Security Group_
 * Add a Custom UDP rule to allow traffic from _0.0.0.0/0_ to port 1194 and store the security group under the name _OpenVPN_
 * Preview and Launch the instance
+* Add the _default VPC security group_ to the instance (EC2 table -> Context Menu -> Networking -> Change Security Groups)
 
 ### Install and start docker
 Connect to the instance through ssh and execute the following commands:
