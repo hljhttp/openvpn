@@ -1,0 +1,344 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+  "Parameters" : {
+    "VpcID": {
+      "Type": "String",
+      "Description": "ID of the VPC to place this instance into"
+    },
+    "KeyName": {
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "Default": "moovel",
+      "Description": "Name of an existing EC2 KeyPair to enable SSH access to the ECS instances"
+    },
+    "PrivateSubnetIDs": {
+      "Type": "List<AWS::EC2::Subnet::Id>",
+      "Description": "List of existing private subnet IDs"
+    },
+    "PublicSubnetIDs": {
+      "Type": "List<AWS::EC2::Subnet::Id>",
+      "Description": "List of existing public subnet IDs"
+    },
+    "Environment": {
+      "Type": "String",
+      "Default" : "dev",
+      "Description": "Name of the target environment"
+    },
+    "DesiredCapacity": {
+      "Type": "Number",
+      "Default" : "1",
+      "Description": "Number of instances to launch in your ECS cluster"
+    },
+    "MaxSize": {
+      "Type": "Number",
+      "Default" : "1",
+      "Description": "Maximum number of instances that can be launched in your ECS cluster"
+    },
+    "InstanceType": {
+      "Description": "The EC2 instance type",
+      "Type": "String",
+      "Default": "t2.small",
+      "AllowedValues": [ "t2.micro", "t2.small", "t2.medium", "m3.medium", "m3.large", "m3.xlarge",
+        "m3.2xlarge", "c3.large", "c3.xlarge", "c3.2xlarge", "c3.4xlarge", "c3.8xlarge", "c4.large", "c4.xlarge",
+        "c4.2xlarge", "c4.4xlarge", "c4.8xlarge", "r3.large", "r3.xlarge", "r3.2xlarge", "r3.4xlarge", "r3.8xlarge",
+        "i2.xlarge", "i2.2xlarge", "i2.4xlarge", "i2.8xlarge", "d2.xlarge", "d2.2xlarge", "d2.4xlarge", "d2.8xlarge",
+        "hi1.4xlarge", "hs1.8xlarge", "cr1.8xlarge", "cc2.8xlarge"],
+      "ConstraintDescription": "must be a valid EC2 instance type."
+    }
+  },
+
+  "Mappings" : {
+    "AWSRegionToAMI" : {
+      "us-east-1"      : { "AMIID" : "ami-0d4cfd66" },
+      "us-west-1"      : { "AMIID" : "ami-87ea13c3" },
+      "us-west-2"      : { "AMIID" : "ami-d5c5d1e5" },
+      "eu-west-1"      : { "AMIID" : "ami-e4d18e93" },
+      "eu-central"     : { "AMIID" : "ami-a6b0b7bb" },
+      "ap-southeast-1" : { "AMIID" : "ami-d44b4286" },
+      "ap-northeast-1" : { "AMIID" : "ami-1c1b9f1c" },
+      "ap-southeast-2" : { "AMIID" : "ami-db7b39e1" },
+      "sa-east-1"      : { "AMIID" : "ami-55098148" }
+    }
+  },
+
+  "Resources" : {
+    "VpnEIP" : {
+      "Type" : "AWS::EC2::EIP",
+      "Properties" : {
+        "Domain" : "vpc"
+      }
+    },
+    "VpnAutoScalingGroup" : {
+      "Type" : "AWS::AutoScaling::AutoScalingGroup",
+      "DependsOn" : "VpnEIP",
+      "Properties" : {
+        "VPCZoneIdentifier" : { "Ref" : "PublicSubnetIDs" },
+        "LaunchConfigurationName" : { "Ref" : "VpnLaunchConfiguration" },
+        "HealthCheckType" : "EC2",
+        "MinSize" : "1",
+        "MaxSize" : { "Ref" : "MaxSize" },
+        "DesiredCapacity" : { "Ref" : "DesiredCapacity" },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": { "Fn::Join": [ "-", [ "openvpn", { "Ref": "Environment" } ] ] },
+            "PropagateAtLaunch": true
+          },
+          {
+            "Key": "consul-cluster",
+            "Value": { "Fn::Join": [ "-", [ "consul", { "Ref": "Environment" } ] ] },
+            "PropagateAtLaunch": true
+          }
+        ]
+      },
+      "CreationPolicy" : {
+        "ResourceSignal" : {
+          "Timeout" : "PT15M"
+        }
+      },
+      "UpdatePolicy": {
+        "AutoScalingRollingUpdate": {
+          "MinInstancesInService": "1",
+          "MaxBatchSize": "1",
+          "PauseTime" : "PT15M",
+          "WaitOnResourceSignals": "true"
+        }
+      }
+    },
+    "VpnLaunchConfiguration": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Metadata" : {
+        "AWS::CloudFormation::Authentication": {
+          "S3Access" : {
+            "type" : "S3",
+            "buckets": [ { "Fn::Join" : [ "", [ "moovel-openvpn-", { "Ref": "Environment" } ] ] } ],
+            "roleName": { "Ref": "EC2Role" }
+          }
+        },
+        "AWS::CloudFormation::Init" : {
+          "config" : {
+
+            "packages" : {
+              "yum" : {
+                "docker" : [],
+                "jq": []
+              }
+            },
+
+            "files" : {
+              "/etc/cfn/cfn-hup.conf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "[main]\n",
+                  "stack=", { "Ref" : "AWS::StackId" }, "\n",
+                  "region=", { "Ref" : "AWS::Region" }, "\n"
+                ]]},
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root"
+              },
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf" : {
+                "content": { "Fn::Join" : ["", [
+                  "[cfn-auto-reloader-hook]\n",
+                  "triggers=post.update\n",
+                  "path=Resources.VpnLaunchConfiguration.Metadata.AWS::CloudFormation::Init\n",
+                  "action=/opt/aws/bin/cfn-init -v ",
+                  "         --stack ", { "Ref" : "AWS::StackName" },
+                  "         --resource VpnLaunchConfiguration ",
+                  "         --region ", { "Ref" : "AWS::Region" }, "\n",
+                  "runas=root\n"
+                ]]}
+              },
+              "/etc/openvpn.tgz" : {
+                "source" : { "Fn::Join" : [ "", [ "http://moovel-openvpn-", { "Ref": "Environment" }, ".s3-", { "Ref" : "AWS::Region" }, ".amazonaws.com/openvpn.tgz" ] ] },
+                "authentication" : "S3Access"
+              }
+            },
+
+            "commands" : {
+              "01_associate_vpneip" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "export AWS_DEFAULT_REGION=", { "Ref" : "AWS::Region" }, "\n",
+                  "aws ec2 associate-address",
+                  " --allow-reassociation",
+                  " --instance-id $(curl http://169.254.169.254/latest/meta-data/instance-id)",
+                  " --allocation-id ", { "Fn::GetAtt": [ "VpnEIP", "AllocationId" ] } ] ] }
+              },
+              "02_extract_openvpn_archive" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "tar xfz /etc/openvpn.tgz -C /etc\n", "rm /etc/openvpn.tgz" ] ] }
+              },
+              "03_create_openvpn_conf_from_template" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "cp /etc/openvpn/openvpn.conf.template /etc/openvpn/openvpn.conf" ] ] }
+              },
+              "04_configure_dns_push" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "echo >>/etc/openvpn/openvpn.conf ",
+                  "push \\\"dhcp-option DNS $(curl http://169.254.169.254/latest/meta-data/local-ipv4)\\\"" ] ] }
+              },
+              "05_configure_routes" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "export AWS_DEFAULT_REGION=", { "Ref" : "AWS::Region" },"\n",
+                  "for subnet in $(aws ec2 describe-subnets --filters Name=vpc-id,Values=", { "Ref" : "VpcID" }," | jq -r .Subnets[].CidrBlock); do\n",
+                  "  eval \"$(ipcalc -nm $subnet)\"\n",
+                  "  echo >>/etc/openvpn/openvpn.conf push \\\"route $NETWORK $NETMASK\\\"\n",
+                  "done" ] ] }
+              },
+              "06_write_consul_config" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "mkdir -p /etc/consul\n",
+                  "echo >/etc/consul/consul.json ",
+                  "{", "$'\\n'",
+                  " \\\"data_dir\\\": \\\"/data\\\",", "$'\\n'",
+                  " \\\"ui_dir\\\": \\\"/ui\\\",", "$'\\n'",
+                  " \\\"client_addr\\\": \\\"0.0.0.0\\\",", "$'\\n'",
+                  " \\\"ports\\\": { \\\"dns\\\": 53 },", "$'\\n'",
+                  " \\\"disable_update_check\\\": true,", "$'\\n'",
+                  " \\\"leave_on_terminate\\\": true,", "$'\\n'",
+                  " \\\"recursors\\\": [ \\\"$(awk '/nameserver/ { print $2;exit;}' /etc/resolv.conf)\\\" ]", "$'\\n'",
+                  "}" ] ] }
+              },
+              "07_rewrite_resolv_conf" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "echo >/etc/resolv.conf ",
+                  "search service.consul", "$'\\n'",
+                  "nameserver $(curl http://169.254.169.254/latest/meta-data/local-ipv4)", "$'\\n'",
+                  "nameserver $(awk '/nameserver/ { print $2;exit;}' /etc/resolv.conf)" ] ] }
+              },
+              "08_write_consul_cluster_config" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "echo CONSUL_CLUSTER='consul-", { "Ref": "Environment" }, "' >> /etc/consul/cluster.config" ] ] }
+              },
+              "09_create_consul_data_dir" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "mkdir -p /opt/consul" ] ] }
+              },
+              "10_start_docker" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "/sbin/service docker start" ] ] }
+              },
+              "11_start_consul_agent" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "docker run -d --restart=always",
+                  " -p 8301:8301 -p 8301:8301/udp -p 8400:8400 -p 8500:8500 -p 53:53/udp",
+                  " -v /opt/consul:/data -v /var/run/docker.sock:/var/run/docker.sock:ro -v /etc/consul:/config",
+                  " -h $(curl -s http://169.254.169.254/latest/meta-data/instance-id)",
+                  " --name consul-agent",
+                  " moovel/consul"] ] }
+              },
+              "12_start_openvpn" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "docker run -d --restart=always",
+                  " -p 1194:1194/udp",
+                  " -v /etc/openvpn:/etc/openvpn",
+                  " --net=host --cap-add=NET_ADMIN",
+                  " --name openvpn",
+                  " moovel/openvpn"] ] }
+              },
+              "13_create_nat_rule" : {
+                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
+                  "server=\"$(awk '/^server/ { print $2,$3;exit;}' /etc/openvpn/openvpn.conf)\"\n",
+                  "eval \"$(ipcalc -np $server)\"\n",
+                  "iptables -t nat -A POSTROUTING -s $NETWORK/$PREFIX -o eth0 -j MASQUERADE" ] ] }
+              }
+            },
+
+            "services" : {
+              "sysvinit" : {
+                "cfn-hup" : { "enabled" : "true", "ensureRunning" : "true", "files" : ["/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf"] }
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "ImageId" : { "Fn::FindInMap" : [ "AWSRegionToAMI", { "Ref" : "AWS::Region" }, "AMIID" ] },
+        "InstanceType"   : { "Ref" : "InstanceType" },
+        "IamInstanceProfile": { "Ref": "EC2InstanceProfile" },
+        "KeyName"        : { "Ref" : "KeyName" },
+        "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+          "#!/bin/bash -xe\n",
+          "yum install -y aws-cfn-bootstrap\n",
+
+          "/opt/aws/bin/cfn-init -v ",
+          "         --stack ", { "Ref" : "AWS::StackName" },
+          "         --resource VpnLaunchConfiguration ",
+          "         --region ", { "Ref" : "AWS::Region" }, "\n",
+
+          "/opt/aws/bin/cfn-signal -e $? ",
+          "         --stack ", { "Ref" : "AWS::StackName" },
+          "         --resource VpnAutoScalingGroup ",
+          "         --region ", { "Ref" : "AWS::Region" }, "\n"
+        ]]}}
+      }
+    },
+    "EC2Role": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "ec2.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        },
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "ecs-service",
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeSubnets",
+                    "ec2:DescribeInstances",
+                    "ec2:AssociateAddress",
+                    "ec2:DisassociateAddress"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": [ { "Fn::Join" : [ "", [ "arn:aws:s3:::moovel-openvpn-", { "Ref": "Environment" }, "/*" ] ] } ]
+                },
+                {
+                  "Effect" : "Allow",
+                  "Action" : "cloudwatch:*",
+                  "Resource" : "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "EC2InstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/",
+        "Roles": [
+          {
+            "Ref": "EC2Role"
+          }
+        ]
+      }
+    }
+  },
+
+  "Outputs" : {
+    "OpenVPNEIP" : {
+      "Value" : { "Ref" : "VpnEIP" }
+    }
+  }
+}
