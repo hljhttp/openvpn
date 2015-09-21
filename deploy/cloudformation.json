@@ -173,6 +173,7 @@
               "04_configure_dns_push" : {
                 "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
                   "echo >>/etc/openvpn/openvpn.conf ",
+                  "push \\\"dhcp-option DOMAIN service.consul\\\"", "$'\\n'",
                   "push \\\"dhcp-option DNS $(curl http://169.254.169.254/latest/meta-data/local-ipv4)\\\"" ] ] }
               },
               "05_configure_routes" : {
@@ -252,6 +253,7 @@
       },
       "Properties": {
         "ImageId" : { "Fn::FindInMap" : [ "AWSRegionToAMI", { "Ref" : "AWS::Region" }, "AMIID" ] },
+        "SecurityGroups" : [ { "Ref" : "VpnSecurityGroup" } ],
         "InstanceType"   : { "Ref" : "InstanceType" },
         "IamInstanceProfile": { "Ref": "EC2InstanceProfile" },
         "KeyName"        : { "Ref" : "KeyName" },
@@ -269,6 +271,33 @@
           "         --resource VpnAutoScalingGroup ",
           "         --region ", { "Ref" : "AWS::Region" }, "\n"
         ]]}}
+      }
+    },
+    "VpnSecurityGroup": {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "allow OpenVPN connections",
+        "VpcId":{
+          "Ref":"VpcID"
+        },
+        "Tags": [ {
+          "Key": "Name",
+          "Value": { "Fn::Join": [ "-", [ "openvpn", { "Ref": "Environment" } ] ] }
+        } ],
+        "SecurityGroupIngress" : [
+          {
+            "IpProtocol" : "tcp",
+            "FromPort" : "22",
+            "ToPort" : "22",
+            "CidrIp" : "0.0.0.0/0"
+          },
+          {
+            "IpProtocol" : "udp",
+            "FromPort" : "1194",
+            "ToPort" : "1194",
+            "CidrIp" : "0.0.0.0/0"
+          }
+        ]
       }
     },
     "EC2Role": {
