@@ -11,39 +11,46 @@ Note that the following instructions are based on this
 This document also contains information on how to setup the client on Windows, Linux or Mac. 
 
 ## Installation
-
-### Create EC2 instance
-The OpenVPN server will be installed on an EC2 instance that is located in one of the subnets of the target VPC.
-The EC2 console can be used to launch the instance.
-
-* Select the current _Amazon Linux AMI_ (e.g. _Amazon Linux AMI 2015.03 (HVM), SSD Volume Type - ami-a10897d6_)
-* Select _t2.small_ as instance type and click _Configure Instance Details_
-* Select the appropriate VPC, check _Protect against accidental termination_ and click _Add Storage_
-* Leave default and click _Tag Instance_
-* As _Name_ select _OpenVPN_ and click _Configure Security Group_
-* Add a Custom UDP rule to allow traffic from _0.0.0.0/0_ to port 1194 and store the security group under the name _OpenVPN_
-* Preview and Launch the instance
-* Add the _default VPC security group_ to the instance (EC2 table -> Context Menu -> Networking -> Change Security Groups)
-
-### Install and start docker
-Connect to the instance through ssh and execute the following commands:
-
+[Cloudformation](https://aws.amazon.com/de/cloudformation) is used to setup the OpenVPN server.
+In the directory _deploy_ execute the following command:
 ```
-ssh ec2-user@public-ip-of-the-instance
-yum -y install docker
-service docker start
+./infrastructure.sh start
 ```
+This script will start a cloudformation stack described by the file _cloudformation.json_.
+Note that it can be configured using environment variables described at the beginning of the script.
+The following resources are created:
 
-### Initialize the configuration files
-Decide under which [FQDN](https://en.wikipedia.org/wiki/Fully_qualified_domain_name) the OpenVPN server should
+* _Elastic IP_ that allows to address the OpenVPN server through DNS (e.g. Route 53)
+* _AutoScalingGroup_ that ensures that exactly one OpenVPN server is running (i.e. it is restarted after crash)
+* Security Group that allows incoming OpenVPN and SSH traffic
+* IAM Role and Policies required by the server to run
+
+At boot time of the OpenVPN EC2 instance the following steps are performed:
+
+1. the instance is associated with the _Elastic IP_
+2. The OpenVPN configuration and certificates are loaded from an S3 bucket
+3. Configurations are written based on the network topology
+4. a [Consul](https://www.consul.io/) agent [docker](https://www.docker.com/) container is started that joins a consul cluster
+5. a OpenVPN docker container is started
+
+## Configuration of the Consul Agent
+For the Consul Agent to work it must be able to communicate to the Consul Servers.
+This is ensured by the tag _consul-cluster_ that all consul servers and agents have in common.
+It is defined in the _AutoScalingGroup_ section of the _cloudformation.json_ file.
+
+## Initial OpenVPN configuration
+For an initial creation of the configuration files
+decide under which [FQDN](https://en.wikipedia.org/wiki/Fully_qualified_domain_name) the OpenVPN server should
 be reachable and initialize the OpenVPN configuration files in _/etc/openvpn_.
 Execute the following command on the server:
 
 ```
 docker run -v /etc/openvpn:/etc/openvpn --rm moovel/openvpn ovpn_genconfig -u udp://openvpn.dev.moovel-app.com:1194
+mv /etc/openvpn/openvpn.conf /etc/openvpn/openvpn.conf.template
 ```
 
 Note that the command above uses _openvpn.dev.moovel-app.com_ as FQDN.
+All dhcp _push_ commands should be removed from the _openvpn.conf.template_ file. 
 
 ### Generate the EasyRSA PKI certificate authority
 
@@ -52,60 +59,24 @@ Execute the following command on the server to generate the server certificates:
 ```
 docker run -v /etc/openvpn:/etc/openvpn --rm -it moovel/openvpn ovpn_initpki
 ```
- 
-### Configure the OpenVPN server
 
-The OpenVPN server is configured with the file _/etc/openvpn/openvpn.conf_.
-A template is located in this repository and can be copied to the server:
+## Configuration of the OpenVPN Server
+A current limitation of the cloudformation is the fact that the default security group of the VPC
+must be added manually to the EC2 instance after starting the stack.
 
-```
-scp openvpn.conf ec2-user@public-ip-of-the-instance:/etc/openvpn
-```
+The actual OpenVPN configuration is located in a file _openvpn.tgz_ that is downloaded from an S3 bucket.
+The name of the bucket is defined in the _LauchConfiguration_ section of the _cloudformation.json_ file.
+The contents of the archive is the folder _/etc/openvpn_.
 
-#### Define the IP range of the clients
-In the _server_ option make sure that the CIDR is not part of the target VPC's CIDR and that it is not yet in use for your local network:
+### Define the IP range of the clients
+The folder contains the file _/etc/openvpn/openvpn.conf.template_.
+In the _server_ option in this file make sure that the CIDR is not part of the target
+VPC's CIDR and that it is not yet in use for your local network:
 This IPs of the OpenVPN clients will be taken from this range.
 
-#### Configure paths to the certificate files
+### Configure paths to the certificate files
 Make sure that the options _key_, _ca_, _cert_ and _dh_ point to existing files.
 Note that the path contains the FQDN that was selected above.
-  
-#### Configure the DNS-Server
-Change the IP address in the line _push "dhcp-option DNS 172.31.0.2"_ to the correct DNS server.
-The IP address can be identified by executing the following command on the server:
-
-```
-cat /etc/resolv.conf | grep nameserver | head -1 | awk '{print $2}'
-```
-#### Configure the routes to push to the client
-The routes to the subnets that are associated with the VPC must be pushed to the routing table of the client.
-Adjust the entries to the subnets of the target VPC.
- 
-### Install startup script
-Copy the file _docker-openvpn.conf_ into the folder _/etc/init_ using scp.
-Execute the following command locally:
-
-```
-scp docker-openvpn.conf ec2-user@public-ip-of-the-instance:/etc/init
-```
-
-### Start the server
-The server can be started with the command
-
-```
-start docker-openvpn
-```
-
-### Setup Network Address Translation
-The following NAT rule is necessary to route the OpenVPN traffic through the VPN.
-Execute this statement on the OpenVPN server:
-
-```
-iptables -t nat -A POSTROUTING -s 172.20.0.0/20 -o eth0 -j MASQUERADE
-```
-
-Note that the network _172.20.0.0/20_ must be the same as specified in the 
-_server_ section of the file _/etc/openvpn/openvpn.conf_ 
 
 ## Generate client certificates
 Each client will need a dedicated certificate to connect to the OpenVPN server.
