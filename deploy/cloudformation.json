@@ -224,7 +224,7 @@
                   " -v /opt/consul:/data -v /var/run/docker.sock:/var/run/docker.sock:ro -v /etc/consul:/config",
                   " -h $(curl -s http://169.254.169.254/latest/meta-data/instance-id)",
                   " --name consul-agent",
-                  " moovel/consul"] ] }
+                  " moovel/consul-agent"] ] }
               },
               "12_start_openvpn" : {
                 "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
