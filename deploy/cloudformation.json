@@ -173,7 +173,9 @@
               "04_configure_dns_push" : {
                 "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
                   "echo >>/etc/openvpn/openvpn.conf ",
-                  "push \\\"dhcp-option DOMAIN service.consul\\\"", "$'\\n'",
+                  "push \\\"dhcp-option DOMAIN consul\\\"", "$'\\n'",
+                  "push \\\"dhcp-option DOMAIN-SEARCH service.consul\\\"", "$'\\n'",
+                  "push \\\"dhcp-option DOMAIN-SEARCH node.consul\\\"", "$'\\n'",
                   "push \\\"dhcp-option DNS $(curl http://169.254.169.254/latest/meta-data/local-ipv4)\\\"" ] ] }
               },
               "05_configure_routes" : {
@@ -201,7 +203,7 @@
               "07_rewrite_resolv_conf" : {
                 "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n",
                   "echo >/etc/resolv.conf ",
-                  "search service.consul", "$'\\n'",
+                  "search service.consul node.consul", "$'\\n'",
                   "nameserver $(curl http://169.254.169.254/latest/meta-data/local-ipv4)", "$'\\n'",
                   "nameserver $(awk '/nameserver/ { print $2;exit;}' /etc/resolv.conf)" ] ] }
               },
