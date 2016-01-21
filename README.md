@@ -6,9 +6,9 @@ This OpenVPN Server can connect clients to the VPC.
 Clients typically are developer notebooks (roadwarriors).
 The solution could however also be used to connect an entire network with the VPC.
 
-Note that the following instructions are based on this 
+Note that the following instructions are based on this
 [tutorial](https://www.digitalocean.com/community/tutorials/how-to-run-openvpn-in-a-docker-container-on-ubuntu-14-04).
-This document also contains information on how to setup the client on Windows, Linux or Mac. 
+This document also contains information on how to setup the client on Windows, Linux or Mac.
 
 ## Installation
 [Cloudformation](https://aws.amazon.com/de/cloudformation) is used to setup the OpenVPN server.
@@ -45,19 +45,19 @@ be reachable and initialize the OpenVPN configuration files in _/etc/openvpn_.
 Execute the following command on the server:
 
 ```
-docker run -v /etc/openvpn:/etc/openvpn --rm moovel/openvpn ovpn_genconfig -u udp://openvpn.dev.moovel-app.com:1194
+sudo docker run -v /etc/openvpn:/etc/openvpn --rm moovel/openvpn ovpn_genconfig -u udp://openvpn.dev.moovel-app.com:1194
 mv /etc/openvpn/openvpn.conf /etc/openvpn/openvpn.conf.template
 ```
 
 Note that the command above uses _openvpn.dev.moovel-app.com_ as FQDN.
-All dhcp _push_ commands should be removed from the _openvpn.conf.template_ file. 
+All dhcp _push_ commands should be removed from the _openvpn.conf.template_ file.
 
 ### Generate the EasyRSA PKI certificate authority
 
-Execute the following command on the server to generate the server certificates:
+Execute the following command on the server to generate the server certificates (only do that once, per server):
 
 ```
-docker run -v /etc/openvpn:/etc/openvpn --rm -it moovel/openvpn ovpn_initpki
+sudo docker run -v /etc/openvpn:/etc/openvpn --rm -it moovel/openvpn ovpn_initpki
 ```
 
 ## Configuration of the OpenVPN Server
@@ -87,13 +87,13 @@ First generate the required certificates for the user in the folder _/etc/openvp
 Note that _Max Muster_ is used as an example for the username.
 
 ```
-docker run -v /etc/openvpn:/etc/openvpn --rm -it moovel/openvpn easyrsa build-client-full max.muster nopass
+sudo docker run -v /etc/openvpn:/etc/openvpn --rm -it moovel/openvpn easyrsa build-client-full max.muster nopass
 ```
 
 Then export the file into an _.ovpn_ file that can be passed to the user:
 
 ```
-docker run -v /etc/openvpn:/etc/openvpn --rm moovel/openvpn ovpn_getclient max.muster > max.muster.ovpn
+sudo docker run -v /etc/openvpn:/etc/openvpn --rm moovel/openvpn ovpn_getclient max.muster > max.muster.ovpn
 ```
 
 ## Limitations
