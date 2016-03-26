@@ -1,6 +1,6 @@
-# OpenVPN Server based on https://github.com/kylemanna/docker-openvpn
+# OpenVPN Server based on https://hub.docker.com/r/mrbobbytables/openvpn-ldap/
 
-FROM kylemanna/openvpn
+FROM mrbobbytables/openvpn-ldap
 
 RUN apt-get update && \
 	apt-get install -y net-tools vim
