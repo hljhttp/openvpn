@@ -27,9 +27,9 @@ At boot time of the OpenVPN EC2 instance the following steps are performed:
 ## Installation non-AWS
 in non AWS environments, you don't need consul, nor cloudformation to run the docker container.
 However, you have to make sure, that the S3 Bucket is mapped via S3 Port mapping. Reading only suffices, as no write is required.
-OpenVPN initialisation and PKI management should be retrieved via the S3 Bucket.
+OpenVPN Initialisation and PKI management should be retrieved via the S3 Bucket.
 
-The image being used is now: [mrbobbytables/openvpn-ldap](https://hub.docker.com/r/mrbobbytables/openvpn-ldap/) as it uses natively PAM and LDAP for authorisation.
+The image being used is now: [mrbobbytables/openvpn-ldap](https://hub.docker.com/r/mrbobbytables/openvpn-ldap/) as it uses natively PAM and LDAP for authorisation
 
 ## Configuration of the Consul Agent
 For the Consul Agent to work it must be able to communicate to the Consul Servers. This is ensured by the tag _consul-cluster_ that all consul servers and agents have in common. It is defined in the _AutoScalingGroup_ section of the _cloudformation.json_ file.
